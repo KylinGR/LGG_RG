@@ -84,7 +84,7 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
     trlog['val_loss'] = []
     trlog['train_mse'] = []
     trlog['val_mse'] = []
-    trlog['min_val_mse'] = float('inf')
+    trlog['min_val_loss'] = float('inf')  # 修改初始化值
     trlog['final_mae'] = 0.0
 
     timer = Timer()
@@ -96,19 +96,15 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
             data_loader=train_loader, net=model, loss_fn=loss_fn, optimizer=optimizer)
         
         # 计算MAE和MSE
-        mae_train ,mse_train , _  = get_metrics(pred_train, act_train)
-        print('epoch {}, loss={:.4f} mae={:.4f} mse={:.4f}'
-              .format(epoch, loss_train, mae_train, mse_train))
-
         loss_val, pred_val, act_val = predict(
             data_loader=val_loader, net=model, loss_fn=loss_fn
         )
-        mae_val ,mse_val , _ = get_metrics(pred_val, act_val)
+        mae_val, mse_val, _ = get_metrics(pred_val, act_val)
         print('epoch {}, val, loss={:.4f} mae={:.4f} mse={:.4f}'.
               format(epoch, loss_val, mae_val, mse_val))
 
         # 基于验证集损失保存最佳模型
-        if loss_val <= trlog['min_val_loss']:
+        if loss_val < trlog['min_val_loss']:  # 修改为严格小于
             trlog['min_val_loss'] = loss_val
             trlog['final_mae'] = mae_val
             save_model('candidate')
@@ -120,9 +116,9 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
                 break
 
         trlog['train_loss'].append(loss_train)
-        trlog['train_mae'].append(mae_train)
         trlog['val_loss'].append(loss_val)
         trlog['val_mae'].append(mae_val)
+        trlog['val_mse'].append(mse_val)
 
         print('ETA:{}/{} SUB:{} FOLD:{}'.format(timer.measure(), timer.measure(epoch / args.max_epoch),
                                                  subject, fold))
@@ -133,7 +129,7 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
     ensure_path(save_path)
     torch.save(trlog, osp.join(save_path, save_name))
 
-    return trlog['min_val_loss'], trlog['final_mae']
+    return loss_val, mae_val
 
 
 def test(args, data, label, reproduce, subject, fold):
