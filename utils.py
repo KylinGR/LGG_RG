@@ -9,7 +9,7 @@ from eeg_dataset import *
 from torch.utils.data import DataLoader
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-
+from scipy.stats import pearsonr
 
 def set_gpu(x):
     torch.set_num_threads(1)
@@ -110,7 +110,12 @@ def get_metrics(y_pred, y_true):
     mse = mean_squared_error(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
-    return mse, mae, r2
+    # Calculate Pearson correlation coefficient
+    if len(y_pred) > 1:  # Ensure there are enough samples
+        corr, _ = pearsonr(y_true, y_pred)
+    else:
+        corr = 0.0  # Default to 0 if not enough samples
+    return mse, mae, r2, corr
 
 
 def get_trainable_parameter_num(model):

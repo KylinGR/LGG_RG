@@ -35,6 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('--load-path-final', default='./save/final_model.pth')
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--save-model', type=bool, default=True)
+    parser.add_argument('--save_pred', type=bool, default=True)
     ######## Model Parameters ########
     parser.add_argument('--model', type=str, default='LGGNet')
     parser.add_argument('--pool', type=int, default=16)

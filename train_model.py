@@ -82,8 +82,10 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
     trlog['args'] = vars(args)
     trlog['train_loss'] = []
     trlog['val_loss'] = []
-    trlog['train_mse'] = []
-    trlog['val_mse'] = []
+    trlog['train_mae'] = []
+    trlog['val_mae'] = []
+    trlog['train_corr'] = []
+    trlog['val_corr'] = []
     trlog['min_val_loss'] = float('inf')  # 修改初始化值
     trlog['final_mae'] = 0.0
 
@@ -94,17 +96,18 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
     for epoch in range(1, args.max_epoch + 1):
         loss_train, pred_train, act_train = train_one_epoch(
             data_loader=train_loader, net=model, loss_fn=loss_fn, optimizer=optimizer)
-        
-        # 计算MAE和MSE
+        mae_train, mse_train, _ , corr_train = get_metrics(pred_train, act_train)
+
         loss_val, pred_val, act_val = predict(
             data_loader=val_loader, net=model, loss_fn=loss_fn
         )
-        mae_val, mse_val, _ = get_metrics(pred_val, act_val)
-        print('epoch {}, val, loss={:.4f} mae={:.4f} mse={:.4f}'.
-              format(epoch, loss_val, mae_val, mse_val))
+        mae_val, mse_val,  _ ,corr_val = get_metrics(pred_val, act_val)
 
-        # 基于验证集损失保存最佳模型
-        if loss_val < trlog['min_val_loss']:  # 修改为严格小于
+        print('epoch {}, val, loss={:.4f} mae={:.4f} mse={:.4f} corr={:.4f}'.
+              format(epoch, loss_val, mae_val, mse_val, corr_val))
+
+        # 保存最佳模型
+        if loss_val < trlog['min_val_loss']:
             trlog['min_val_loss'] = loss_val
             trlog['final_mae'] = mae_val
             save_model('candidate')
@@ -117,9 +120,11 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
 
         trlog['train_loss'].append(loss_train)
         trlog['val_loss'].append(loss_val)
+        trlog['train_mae'].append(mae_train)
         trlog['val_mae'].append(mae_val)
-        trlog['val_mse'].append(mse_val)
-
+        trlog['train_corr'].append(corr_train)
+        trlog['val_corr'].append(corr_val)
+        
         print('ETA:{}/{} SUB:{} FOLD:{}'.format(timer.measure(), timer.measure(epoch / args.max_epoch),
                                                  subject, fold))
     # save the training log file
@@ -127,6 +132,12 @@ def train(args, data_train, label_train, data_val, label_val, subject, fold):
     experiment_setting = 'T_{}_pool_{}'.format(args.T, args.pool)
     save_path = osp.join(args.save_path, experiment_setting, 'log_train')
     ensure_path(save_path)
+    if args.save_pred:
+        np.save(osp.join(save_path, f'pred_train_sub{subject}_fold{fold}_epoch{epoch}.npy'), np.array(pred_train))
+        np.save(osp.join(save_path, f'act_train_sub{subject}_fold{fold}_epoch{epoch}.npy'), np.array(act_train))
+        np.save(osp.join(save_path, f'pred_val_sub{subject}_fold{fold}_epoch{epoch}.npy'), np.array(pred_val))
+        np.save(osp.join(save_path, f'act_val_sub{subject}_fold{fold}_epoch{epoch}.npy'), np.array(act_val))
+    
     torch.save(trlog, osp.join(save_path, save_name))
 
     return loss_val, mae_val
@@ -158,8 +169,15 @@ def test(args, data, label, reproduce, subject, fold):
     loss, pred, act = predict(
         data_loader=test_loader, net=model, loss_fn=loss_fn
     )
-    mae, mse , _ = get_metrics(y_pred=pred, y_true=act)
-    print('>>> Test:  loss={:.4f} mae={:.4f} mse={:.4f}'.format(loss, mae, mse))
+    mae, mse , r2,corr = get_metrics(y_pred=pred, y_true=act)
+    print('>>> Test:  loss={:.4f}, mae={:.4f}, mse={:.4f}, r2={:.4f}, corr={:.4f}'.format(
+        loss, mae, mse, r2, corr
+    ))
+    if args.save_pred:
+        save_path = osp.join(args.save_path, 'predictions')
+        ensure_path(save_path)
+        np.save(osp.join(save_path, f'pred_test_sub{subject}_fold{fold}.npy'), np.array(pred))
+        np.save(osp.join(save_path, f'act_test_sub{subject}_fold{fold}.npy'), np.array(act))
     return mae, pred, act
 
 
@@ -191,10 +209,8 @@ def combine_train(args, data, label, subject, fold, target_mae):
     trlog = {}
     trlog['args'] = vars(args)
     trlog['train_loss'] = []
-    trlog['val_loss'] = []
     trlog['train_mae'] = []
-    trlog['val_mae'] = []
-    trlog['max_mae'] = 0.0
+    trlog['train_corr'] = []
 
     timer = Timer()
 
@@ -202,9 +218,14 @@ def combine_train(args, data, label, subject, fold, target_mae):
         loss, pred, act = train_one_epoch(
             data_loader=train_loader, net=model, loss_fn=loss_fn, optimizer=optimizer
         )
-        mae, mse , _= get_metrics(y_pred=pred, y_true=act)
-        print('Stage 2 : epoch {}, loss={:.4f} mae={:.4f} mse={:.4f}'
-              .format(epoch, loss, mae, mse))
+        mae, mse , _,corr= get_metrics(y_pred=pred, y_true=act)
+        print('Stage 2 : epoch {}, loss={:.4f} mae={:.4f} mse={:.4f} corr={:.4f}'
+              .format(epoch, loss, mae, mse, corr))
+        if args.save_pred:
+            save_path = osp.join(args.save_path, 'predictions')
+            ensure_path(save_path)
+            np.save(osp.join(save_path, f'pred_combine_sub{subject}_fold{fold}_epoch{epoch}.npy'), np.array(pred))
+            np.save(osp.join(save_path, f'act_combine_sub{subject}_fold{fold}_epoch{epoch}.npy'), np.array(act))
 
         if mae <= target_mae or epoch == args.max_epoch_cmb:
             print('early stopping!')
@@ -221,6 +242,8 @@ def combine_train(args, data, label, subject, fold, target_mae):
 
         trlog['train_loss'].append(loss)
         trlog['train_mae'].append(mae)
+        trlog['train_corr'].append(corr)
+        
 
         print('ETA:{}/{} SUB:{} TRIAL:{}'.format(timer.measure(), timer.measure(epoch / args.max_epoch),
                                                  subject, fold))
