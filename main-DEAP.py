@@ -1,5 +1,6 @@
 from cross_validation import *
 from prepare_data_DEAP import *
+from predict import *
 import argparse
 
 if __name__ == '__main__':
@@ -17,6 +18,7 @@ if __name__ == '__main__':
     parser.add_argument('--input-shape', type=tuple, default=(1, 32, 512))
     parser.add_argument('--data-format', type=str, default='eeg')
     ######## Training Process ########
+    parser.add_argument('--train', action='store_true', help="Run model training")
     parser.add_argument('--random-seed', type=int, default=2021)
     parser.add_argument('--max-epoch', type=int, default=200)
     parser.add_argument('--patient', type=int, default=20)
@@ -43,13 +45,60 @@ if __name__ == '__main__':
     parser.add_argument('--T', type=int, default=64)
     parser.add_argument('--graph-type', type=str, default='hem', choices=['fro', 'gen', 'hem', 'BL'])
     parser.add_argument('--hidden', type=int, default=32)
+    
+     ######## Test Model ########
+    parser.add_argument('--test', action='store_true', help="Run model testing")
+    parser.add_argument('--test-mat-file', type=str, default="data/s01.mat", help="Path to .mat file for testing")
+    parser.add_argument('--load-model-path', type=str, default="min-loss.pth", help="Path to model file for testing")
+    parser.add_argument('--output-dir', type=str, default="test_outputs", help="Directory to save test outputs")
 
     ######## Reproduce the result using the saved model ######
     parser.add_argument('--reproduce', action='store_true')
     args = parser.parse_args()
-    sub_to_run = np.arange(args.subjects)
-    pd = PrepareData(args)
-    pd.run(sub_to_run, split=True, expand=True)
-    cv = CrossValidation(args)
-    seed_all(args.random_seed)
-    cv.n_fold_CV(subject=sub_to_run)
+    if args.train:
+        sub_to_run = np.arange(args.subjects)
+        pd = PrepareData(args)
+        pd.run(sub_to_run, split=True, expand=True)
+        cv = CrossValidation(args)
+        seed_all(args.random_seed)
+        cv.n_fold_CV(subject=sub_to_run)
+    
+    if args.test:
+        pd = PrepareData(args)
+        mat_data = load_mat_file(args.test_mat_file)
+        if mat_data is None:
+            exit()
+        data_var_name = "data"
+        label_var_name = "label"
+
+        if data_var_name not in mat_data or label_var_name not in mat_data:
+            print("Error: Selected variable names not found in .mat file.")
+            exit()
+
+        test_data = mat_data[data_var_name]
+        test_labels = mat_data[label_var_name]
+        # TODO: # labels may not be in the correct order
+        
+        idx = []
+        num_chan_local_graph = []
+        for group in pd.graph_gen_DEAP:
+            num_chan_local_graph.append(len(group))
+            for chan in group:
+                idx.append(pd.original_order.index(chan))
+        
+        from networks import LGGNet  # Replace with your model definition
+        model = LGGNet(num_classes=0,  # 根据模型定义配置参数
+                   input_size=(1,32, 500),
+                   sampling_rate=500,  # 替换为你的采样率
+                   num_T=64,
+                   out_graph=32,
+                   dropout_rate=0.5,
+                   pool=16,
+                   pool_step_rate=0.25,
+                   idx_graph=num_chan_local_graph)
+        model.load_state_dict(torch.load(args.load_model_path))
+        loss_fn = torch.nn.MSELoss()
+        mae, pred, act = test_model(model, test_data, test_labels, loss_fn, args.batch_size, idx=idx)
+        print(f"Mean Absolute Error (MAE): {mae}")
+        save_test_results(pred, act, args.output_dir)
+        visualize_results(pred, act)
